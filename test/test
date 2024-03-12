@@ -1,0 +1,501 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <stdlib.h>
+
+BLEServer* pServer = NULL;
+BLECharacteristic* pCharacteristic_IO1 = NULL;
+BLECharacteristic* pCharacteristic_Order = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+unsigned long previousMillis = 0;
+const long interval = 1000;
+
+// TODO: add new global variables for your sensor readings and processed data
+
+// TODO: Change the UUID to your own (any specific one works, but make sure they're different from others'). You can generate one here: https://www.uuidgenerator.net/
+#define SERVICE_UUID        "18a3c5f7-4a60-4021-acbb-5721434d9239"
+#define CHARACTERISTIC_IO1_UUID "bff7f0c9-5fbf-4b63-8d83-b8e077176fbe"
+#define CHARACTERISTIC_ORDER_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b" // web app (manually input) to ESP32, specify the order of components (e.g. A1d3E2C4)
+
+
+class MyServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+    }
+};
+
+class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+
+        if (value.length() > 0) {
+            Serial.println("New value written:");
+            for (int i = 0; i < value.length(); i++)
+                Serial.print(value[i]);
+
+            Serial.println();
+        }
+    }
+};
+
+void setup() {
+    Serial.begin(115200);
+    Serial.println("Starting BLE work!");
+
+    // TODO: add codes for handling your sensor setup (pinMode, etc.)
+
+    BLEDevice::init("ModularIO"); // Give it a name
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+    pCharacteristic_Order->setCallbacks(new MyCharacteristicCallbacks());
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+
+    pCharacteristic_IO1 = pService->createCharacteristic(
+        CHARACTERISTIC_IO1_UUID,
+        BLECharacteristic::PROPERTY_READ |
+        BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+    pCharacteristic_Order = pService->createCharacteristic(
+        CHARACTERISTIC_ORDER_UUID,
+        BLECharacteristic::PROPERTY_READ |
+        BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+
+    pCharacteristic_IO1->addDescriptor(new BLE2902());
+    pCharacteristic_Order->addDescriptor(new BLE2902());
+    pCharacteristic_IO1->setValue("Hello World");
+    pCharacteristic_Order->setValue("Default String");
+    pService->addCharacteristic(pCharacteristic_Order);
+
+    pService->start();
+    // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // this still is working for backward compatibility
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+    Serial.println("Characteristic defined! Now you can read it in your phone!");
+}
+
+void loop() {
+    // TODO: add codes for handling your sensor readings (analogRead, etc.)
+
+    // TODO: use your defined DSP algorithm to process the readings
+
+    
+    if (deviceConnected) {
+        // Send new readings to database
+        // TODO: change the following code to send your own readings and processed data
+        // unsigned long currentMillis = millis();
+        // if (currentMillis - previousMillis >= interval) {
+        //     pCharacteristic_IO1->setValue("Hello World");
+        //     pCharacteristic_IO1->notify();
+        //     Serial.println("Notify value: Hello World");
+        // }
+        
+
+    }
+
+    // disconnecting
+    if (!deviceConnected && oldDeviceConnected) {
+        delay(500);  // give the bluetooth stack the chance to get things ready
+        pServer->startAdvertising();  // advertise again
+        Serial.println("Start advertising");
+        oldDeviceConnected = deviceConnected;
+    }
+    // connecting
+    if (deviceConnected && !oldDeviceConnected) {
+        // do stuff here on connecting
+        oldDeviceConnected = deviceConnected;
+    }
+    delay(1000);
+}
+
+
+
+
+
+
+#include <ArduinoBLE.h>
+#include <stdio.h>
+#include <string.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+
+Adafruit_MPU6050 mpu;
+
+BLEService modularIOService("18a3c5f7-4a60-4021-acbb-5721434d9239"); // BLE LED Service
+
+// BLE LED Switch Characteristic - custom 128-bit UUID, read and writable by central
+BLEByteCharacteristic orderCharacteristic("dcd9f252-6d5e-4bc7-b00a-7a6834824af1", BLERead | BLEWrite);     // web app (manually input) to ESP32, specify the order of components (e.g. A1d3E2C4)
+BLEByteCharacteristic pinGroup1Characteristic("057a1f2d-7e3b-4b24-89bf-7bedd1f78e94", BLERead | BLEWrite); // characteristic for the pin0,1
+BLEByteCharacteristic pinGroup2Characteristic("e66f28fc-d85b-4e29-adad-20e5409723c8", BLERead | BLEWrite); // characteristic for the pin2,3
+BLEByteCharacteristic pinGroup3Characteristic("a94ded95-c56d-44a8-80f0-f2c66ee0cfa1", BLERead | BLEWrite); // characteristic for the pin4,5
+BLEByteCharacteristic pinGroup4Characteristic("6eec24d7-00b7-4251-aa33-22e49fb199c9", BLERead | BLEWrite); // characteristic for the pin8,9
+
+BLEByteCharacteristic* ioCharacteristicsArray[] = {
+  &pinGroup1Characteristic,
+  &pinGroup2Characteristic,
+  &pinGroup3Characteristic,
+  &pinGroup4Characteristic
+};
+
+char orderData[10];
+bool newData = false;
+int orderDataIndex = 0;
+void clearOrderDataBuffer();
+void motionSetup();
+void ultraSetup(int, int);
+void pinConfig();
+void updateOrderData();
+int pinConfigGroup[4][2] = {{0, 1}, {2, 3}, {4, 5}, {8, 9}}; // 4 components, 2 pins each
+
+char inputChars[] = "brsjmcu";
+char outputChars[] = "vogzd";
+
+void setup()
+{
+    Serial.begin(9600);
+    while (!Serial)
+        ;
+
+    // begin initialization
+    if (!BLE.begin())
+    {
+        Serial.println("starting BLE failed!");
+
+        while (1)
+            ;
+    }
+
+    // set advertised local name and service UUID:
+    BLE.setLocalName("ModularIO");
+    BLE.setDeviceName("ModularIO");
+    BLE.setAdvertisedService(modularIOService);
+
+    // add the characteristic to the service
+    modularIOService.addCharacteristic(orderCharacteristic);
+    modularIOService.addCharacteristic(pinGroup1Characteristic);
+    modularIOService.addCharacteristic(pinGroup2Characteristic);
+    modularIOService.addCharacteristic(pinGroup3Characteristic);
+    modularIOService.addCharacteristic(pinGroup4Characteristic);
+
+    // add service
+    BLE.addService(modularIOService);
+
+    // set the initial value for the characeristic:
+    orderCharacteristic.writeValue(0);
+    pinGroup1Characteristic.writeValue(0);
+    pinGroup2Characteristic.writeValue(0);
+    pinGroup3Characteristic.writeValue(0);
+    pinGroup4Characteristic.writeValue(0);
+
+    // start advertising
+    BLE.advertise();
+
+    clearOrderDataBuffer();
+}
+
+void loop()
+{
+    // listen for BLE peripherals to connect:
+    BLEDevice central = BLE.central();
+
+    // if a central is connected to peripheral:
+    if (central)
+    {
+        Serial.print("Connected to central: ");
+        // print the central's MAC address:
+        Serial.println(central.address());
+
+        // while the central is still connected to peripheral:
+        while (central.connected())
+        {
+            // update the characteristic value when orderCharacteristic is written
+            if (orderCharacteristic.written())
+                updateOrderData();
+        }
+
+        // when the central disconnects, print it out:
+        Serial.print(F("Disconnected from central: "));
+        Serial.println(central.address());
+    }
+
+    if (!orderData[0]) //if orderData is not empty
+    {
+        for (int i = 0; orderData[i] != '\0'; i++)
+        {
+            switch (orderData[i])
+            {
+            case 'J': // if the component is the joystick
+                
+                break;
+            
+            }
+        }
+    }
+}
+
+void clearOrderDataBuffer()
+{
+    memset(orderData, 0, sizeof(orderData));
+}
+
+void updateOrderData()
+{
+    if (!newData)
+    {
+        // Serial.println("New data received");
+        clearOrderDataBuffer();
+        newData = true;
+        orderDataIndex = 0;
+    }
+    char value = char(orderCharacteristic.value());
+
+    // the end of the data is marked by a newline
+    if (value == '\n')
+    {
+        newData = false;
+        Serial.println(orderData);
+        // pinConfig();
+    }
+    else
+    {
+        orderData[orderDataIndex] = value;
+        orderDataIndex++;
+    }
+}
+
+void pinConfig()
+{
+    for (int i = 0; orderData[i] != '\0'; i += 2)
+    {
+        char slotId = orderData[i];
+        char component = orderData[i + 1];
+        // if the component is input
+        if (strchr(inputChars, component))
+        {
+            if (component == 'm') // if is the motion sensor (I2C)
+            {
+                motionSetup();
+            }
+            else
+            {
+                pinMode(pinConfigGroup[slotId - '1'][0], INPUT);
+                pinMode(pinConfigGroup[slotId - '1'][1], INPUT);
+                Serial.print("input");
+                Serial.print(pinConfigGroup[slotId - '1'][0]);
+                Serial.print(" ");
+                Serial.println(pinConfigGroup[slotId - '1'][1]);
+            }
+        }
+        else // if the component is output
+        {
+            if (component == 'u') // if is the ultrasonic sensor
+            {
+                ultraSetup(pinConfigGroup[slotId - '1'][0], pinConfigGroup[slotId - '1'][1]);
+            }
+            else
+            {
+                pinMode(pinConfigGroup[slotId - '1'][0], OUTPUT);
+                pinMode(pinConfigGroup[slotId - '1'][1], OUTPUT);
+                Serial.print("output");
+                Serial.print(pinConfigGroup[slotId - '1'][0]);
+                Serial.print(" ");
+                Serial.println(pinConfigGroup[slotId - '1'][1]);
+            }
+        }
+    }
+}
+
+void motionSetup()
+{
+    // Try to initialize the mpu6050
+    if (!mpu.begin())
+    {
+        Serial.println("Failed to find MPU6050 chip");
+        while (1)
+        {
+            delay(10);
+        }
+    }
+    // setupt motion detection
+    mpu.setHighPassFilter(MPU6050_HIGHPASS_0_63_HZ);
+    mpu.setMotionDetectionThreshold(1);
+    mpu.setMotionDetectionDuration(20);
+    mpu.setInterruptPinLatch(true); // Keep it latched.  Will turn off when reinitialized.
+    mpu.setInterruptPinPolarity(true);
+    mpu.setMotionInterrupt(true);
+}
+
+void ultraSetup(int trigPin, int echoPin)
+{
+    switch (trigPin)
+    {
+    case 0:
+        pinMode(D0, OUTPUT); // Sets the trigPin as an Output
+        pinMode(D1, INPUT);  // Sets the echoPin as an Input
+        break;
+    case 2:
+        pinMode(D2, OUTPUT); // Sets the trigPin as an Output
+        pinMode(D3, INPUT);  // Sets the echoPin as an Input
+        break;
+    case 4:
+        pinMode(D4, OUTPUT); // Sets the trigPin as an Output
+        pinMode(D5, INPUT);  // Sets the echoPin as an Input
+        break;
+    case 8:
+        pinMode(D8, OUTPUT); // Sets the trigPin as an Output
+        pinMode(D9, INPUT);  // Sets the echoPin as an Input
+        break;
+    }
+}
+
+
+
+
+
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+
+BLEServer* pServer = NULL;
+BLECharacteristic* pCharacteristic_IO1 = NULL;
+BLECharacteristic* pCharacteristic_Order = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+unsigned long previousMillis = 0;
+const long interval = 1000;
+
+// TODO: add new global variables for your sensor readings and processed data
+
+// TODO: Change the UUID to your own (any specific one works, but make sure they're different from others'). You can generate one here: https://www.uuidgenerator.net/
+#define SERVICE_UUID        "18a3c5f7-4a60-4021-acbb-5721434d9239"
+#define CHARACTERISTIC_IO1_UUID "bff7f0c9-5fbf-4b63-8d83-b8e077176fbe"
+#define CHARACTERISTIC_ORDER_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b" // web app (manually input) to ESP32, specify the order of components (e.g. A1d3E2C4)
+
+
+class MyServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+    }
+};
+
+class MyCharacteristicCallbacks : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+
+        if (value.length() > 0) {
+            Serial.println("New value written:");
+            for (int i = 0; i < value.length(); i++)
+                Serial.print(value[i]);
+
+            Serial.println();
+        }
+    }
+};
+
+void setup() {
+    Serial.begin(115200);
+    Serial.println("Starting BLE work!");
+
+    // TODO: add codes for handling your sensor setup (pinMode, etc.)
+
+    BLEDevice::init("ModularIO"); // Give it a name
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+    // pCharacteristic_Order->setCallbacks(new MyCharacteristicCallbacks());
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+
+    pCharacteristic_IO1 = pService->createCharacteristic(
+        CHARACTERISTIC_IO1_UUID,
+        BLECharacteristic::PROPERTY_READ |
+        BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+    pCharacteristic_Order = pService->createCharacteristic(
+        CHARACTERISTIC_ORDER_UUID,
+        BLECharacteristic::PROPERTY_READ |
+        BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+
+
+    pCharacteristic_IO1->addDescriptor(new BLE2902());
+    pCharacteristic_Order->addDescriptor(new BLE2902());
+    pCharacteristic_IO1->setValue("Hello World");
+    pCharacteristic_Order->setValue("Default String");
+    pService->addCharacteristic(pCharacteristic_Order);
+
+    pService->start();
+    // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // this still is working for backward compatibility
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+    Serial.println("Characteristic defined! Now you can read it in your phone!");
+}
+
+void loop() {
+    // TODO: add codes for handling your sensor readings (analogRead, etc.)
+
+    // TODO: use your defined DSP algorithm to process the readings
+
+    
+    if (deviceConnected) {
+        // Send new readings to database
+        // TODO: change the following code to send your own readings and processed data
+        // unsigned long currentMillis = millis();
+        // if (currentMillis - previousMillis >= interval) {
+        //     pCharacteristic_IO1->setValue("Hello World");
+        //     pCharacteristic_IO1->notify();
+        //     Serial.println("Notify value: Hello World");
+        // }
+        
+
+    }
+
+    // disconnecting
+    if (!deviceConnected && oldDeviceConnected) {
+        delay(500);  // give the bluetooth stack the chance to get things ready
+        pServer->startAdvertising();  // advertise again
+        Serial.println("Start advertising");
+        oldDeviceConnected = deviceConnected;
+    }
+    // connecting
+    if (deviceConnected && !oldDeviceConnected) {
+        // do stuff here on connecting
+        oldDeviceConnected = deviceConnected;
+    }
+    delay(1000);
+}
