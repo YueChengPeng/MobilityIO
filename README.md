@@ -1,7 +1,8 @@
 MobilityIO is a prototype that adds rich interactiveness - both input and output - to mobility devices.
 
 # HOW TO USE
-Check out the [demonstration video]().
+Check out the [demonstration video](https://github.com/YueChengPeng/MobilityIO/blob/main/img/demo.mp4).
+![demo video](./img/demo.mp4)
 
 Detailed steps ⬇️
 - Plug in the battery. Notice the mark on the sensor base. __Left: positive, right: negative__.
